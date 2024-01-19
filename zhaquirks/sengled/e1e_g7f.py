@@ -17,6 +17,7 @@ from zigpy.zcl.clusters.general import (
 
 from zhaquirks import Bus
 from zhaquirks.const import (
+    ARGS,
     COMMAND,
     COMMAND_OFF,
     COMMAND_ON,
@@ -100,20 +101,20 @@ class SengledE1EG7FManufacturerSpecificCluster(CustomCluster):
         elif args[0] == 2:
             if args[2] == 2:
                 self.endpoint.device.level_control_bus.listener_event(
-                    "listener_event", ZHA_SEND_EVENT, COMMAND_STEP, [0, 2, 0]
+                    "listener_event", ZHA_SEND_EVENT, COMMAND_STEP, [2]
                 )
             else:
                 self.endpoint.device.level_control_bus.listener_event(
-                    "listener_event", ZHA_SEND_EVENT, COMMAND_STEP, [0, 1, 0]
+                    "listener_event", ZHA_SEND_EVENT, COMMAND_STEP, [0]
                 )
         elif args[0] == 3:
             if args[2] == 2:
                 self.endpoint.device.level_control_bus.listener_event(
-                    "listener_event", ZHA_SEND_EVENT, COMMAND_STEP, [1, 2, 0]
+                    "listener_event", ZHA_SEND_EVENT, COMMAND_STEP, [3]
                 )
             else:
                 self.endpoint.device.level_control_bus.listener_event(
-                    "listener_event", ZHA_SEND_EVENT, COMMAND_STEP, [1, 1, 0]
+                    "listener_event", ZHA_SEND_EVENT, COMMAND_STEP, [1]
                 )
         elif args[0] == 4:
             self.endpoint.device.on_off_bus.listener_event(
@@ -203,11 +204,23 @@ class SengledE1EG7F(CustomDevice):
         (DOUBLE_PRESS, TURN_ON): {COMMAND: "on_double"},
         (SHORT_PRESS, DIM_UP): {
             COMMAND: COMMAND_STEP,
-            PARAMS: {"step_mode": 0},
+            ARGS: [0],
+            PARAMS: {},
+        },
+        (LONG_PRESS, DIM_UP): {
+            COMMAND: COMMAND_STEP,
+            ARGS: [2],
+            PARAMS: {},
         },
         (SHORT_PRESS, DIM_DOWN): {
             COMMAND: COMMAND_STEP,
-            PARAMS: {"step_mode": 1},
+            ARGS: [1],
+            PARAMS: {},
+        },
+        (LONG_PRESS, DIM_DOWN): {
+            COMMAND: COMMAND_STEP,
+            ARGS: [3],
+            PARAMS: {},
         },
         (SHORT_PRESS, TURN_OFF): {COMMAND: COMMAND_OFF},
         (LONG_PRESS, TURN_OFF): {COMMAND: "off_long"},

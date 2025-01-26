@@ -7,7 +7,7 @@ from zhaquirks import CustomCluster
 
 
 class SoilMoistureCluster(SoilMoisture, CustomCluster):
-    """Soil Moisture Cluster for TR"""
+    """Soil Moisture Cluster for TR."""
 
     cluster_id = 1029
 

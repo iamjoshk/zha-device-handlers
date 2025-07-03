@@ -3,13 +3,11 @@
 from zigpy.quirks.v2 import (
     QuirkBuilder,
     ReportingConfig,
-    SensorStateClass,
     SensorDeviceClass,
+    SensorStateClass,
 )
 from zigpy.quirks.v2.homeassistant import PERCENTAGE
-from zigpy.zcl.clusters.measurement import RelativeHumidity, SoilMoisture
-
-from zhaquirks import CustomCluster
+from zigpy.zcl.clusters.measurement import RelativeHumidity
 
 (
     QuirkBuilder("Third Reality, Inc", "3RSM0147Z")
@@ -38,5 +36,6 @@ from zhaquirks import CustomCluster
         # To "migrate" existing entities, clone the unique ID suffix of the relative
         # humidity entity
         unique_id_suffix="1029",
-    ).add_to_registry()
+    )
+    .add_to_registry()
 )

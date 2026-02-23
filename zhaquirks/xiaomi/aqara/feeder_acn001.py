@@ -29,7 +29,6 @@ from zhaquirks.const import (
     PROFILE_ID,
     UNKNOWN,
     VALUE,
-    # event constants
     ZHA_SEND_EVENT,
 )
 from zhaquirks.xiaomi import XiaomiAqaraE1Cluster, XiaomiCustomDevice
@@ -89,7 +88,6 @@ AQARA_TO_ZCL: dict[int, int] = {
     FEEDING_MODE: ZCL_FEEDING_MODE,
     SERVING_SIZE: ZCL_SERVING_SIZE,
     PORTION_WEIGHT: ZCL_PORTION_WEIGHT,
-    # scheduling string handled separately
 }
 
 ZCL_TO_AQARA: dict[int, int] = {
@@ -199,17 +197,9 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
     def _handle_attribute_event(
         self, event: AttributeReportedEvent | AttributeUpdatedEvent
     ) -> None:
-        """Handle attribute report/update event to parse feeder attribute.
-
-        We only need the raw bytes for parsing; the event objects are frozen, so
-        attempting to mutate ``event.value`` will raise.  Instead, copy to a
-        local variable and push that value to ``_parse_feeder_attribute``.  The
-        ZHA event sanitization is handled separately in
-        ``_handle_attribute_report``.
-        """
+        """Handle attribute report/update event to parse feeder attribute."""
         raw: bytes | None = None
         if isinstance(event.value, (bytes, types.LVBytes)):
-            # capture the bytes for parsing
             with contextlib.suppress(Exception):
                 raw = bytes(event.value)
 
@@ -219,15 +209,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
     def _handle_attribute_report(
         self, event: AttributeReportedEvent | AttributeUpdatedEvent
     ) -> None:
-        """Sanitize values when EventableCluster creates zha_event.
-
-        This method is called by the base class whenever an attribute report
-        or update event is emitted.  We log entry and exit so we can verify
-        it actually runs in tests, and record the incoming type/value.  The
-        previous implementation used ``isinstance`` to detect bytes, but the
-        call site in the tests showed the value stayed unchanged; the log
-        output will help us understand why the branch is not being entered.
-        """
+        """Sanitize values when EventableCluster creates zha_event."""
         LOGGER.debug(
             "OppleCluster._handle_attribute_report called: attr_id=%s value=%r type=%s",
             event.attribute_id,
@@ -235,9 +217,6 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
             type(event.value),
         )
 
-        # the event object is frozen, so mutating ``event.value`` is not
-        # allowed; instead compute a sanitized copy and fire the ZHA event
-        # ourselves rather than relying on ``super()``.
         out_value = event.value
         if isinstance(out_value, (bytes, types.LVBytes)):
             try:
@@ -246,11 +225,9 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
                     "OppleCluster._handle_attribute_report sanitized value -> %r",
                     out_value,
                 )
-            except Exception as exc:  # pragma: no cover - defensive
+            except Exception as exc:
                 LOGGER.exception("Failed sanitizing event value: %s", exc)
 
-        # mimic EventableCluster._handle_attribute_report but with sanitized
-        # value to ensure zha_event payload contains only JSON-safe types
         self.listener_event(
             ZHA_SEND_EVENT,
             COMMAND_ATTRIBUTE_UPDATED,
@@ -266,12 +243,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         self._update_attribute(zcl_attr_def.id, zcl_attr_def.type.deserialize(value)[0])
 
     def _parse_feeder_attribute(self, value: Any) -> None:
-        """Parse the feeder attribute.
-
-        The raw feed attribute is a small binary blob (or in our sanitised
-        events, a hex string).  Guard against malformed/short payloads by
-        exiting early if the data is too short or not bytes.
-        """
+        """Parse the feeder attribute."""
         # convert hex string back to bytes if necessary
         if isinstance(value, str):
             try:
@@ -279,17 +251,12 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
             except ValueError:
                 return
 
-        # convert anything that looks like bytes into real bytes; if we
-        # can't cast it, bail out.  this replaces the previous isinstance
-        # guard which confused mypy into thinking the return was
-        # unreachable.
         try:
             value = bytes(value)
-        except Exception:  # pragma: no cover - defensive
+        except Exception:
             return
 
         if len(value) < 8:
-            # nothing useful to parse
             return
 
         try:
@@ -324,7 +291,6 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
             weight_per_day, _ = types.uint32_t_be.deserialize(attribute_value)
             self._update_attribute(ZCL_WEIGHT_DISPENSED, weight_per_day)
         elif attribute == SCHEDULING_STRING:
-            # new schedule reply from device; parse and update attribute
             self._parse_schedule(attribute_value)
         else:
             LOGGER.debug(
@@ -488,18 +454,11 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         attributes: dict[str | int | foundation.ZCLAttributeDef, Any],
         **kwargs,
     ) -> list[list[foundation.WriteAttributesStatusRecord]]:
-        """Write attributes to device with internal 'attributes' validation.
-
-        The ``schedule`` attribute must be encoded into the proprietary feeder
-        attribute rather than written directly.  Handling occurs before the
-        generic translation loop below.
-        """
-        # handle schedule specially
+        """Write attributes to device with internal 'attributes' validation."""
         if any(
             (attr == ZCL_SCHEDULE or (isinstance(attr, str) and attr == "schedule"))
             for attr in attributes
         ):
-            # expect only one schedule at a time
             schedule_val = str(
                 getattr(
                     attributes.get(ZCL_SCHEDULE, attributes.get("schedule")),
@@ -510,13 +469,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
             if schedule_val.strip():
                 packet = self._encode_schedule(schedule_val)
                 if packet:
-                    # update entity cache
                     self._update_attribute(ZCL_SCHEDULE, schedule_val)
-                    # fire a ZHA event so automations watching for schedule
-                    # changes will see it immediately (write_attributes is
-                    # executed before the network request).  Without this
-                    # some consumers only saw subsequent feeder_attr replies
-                    # and therefore missed the update.
                     self.listener_event(
                         ZHA_SEND_EVENT,
                         COMMAND_ATTRIBUTE_UPDATED,
@@ -564,10 +517,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
             else:
                 attrs[attr] = value
         LOGGER.debug("OppleCluster.write_attributes: %s", attrs)
-        # Skip attr cache because of the encoding from Xiaomi and
-        # the attributes are reported back by the device
-        kwargs.pop("update_cache", None)  # To not break when this is passed already
-        # schedule special-case happens earlier, so normal attr->aqara mapping
+        kwargs.pop("update_cache", None)
         return await super().write_attributes(attrs, update_cache=False, **kwargs)
 
 
@@ -576,8 +526,6 @@ class AqaraFeederAcn001(XiaomiCustomDevice):
 
     async def async_configure(self) -> None:
         """Perform post-setup configuration after endpoint/cluster setup."""
-        # call super if implemented so we don't accidentally skip inherited
-        # behaviour from mixins or base classes.
         if hasattr(super(), "async_configure"):
             await super().async_configure()
 

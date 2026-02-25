@@ -743,11 +743,6 @@ async def test_aqara_feeder_write_schedule(zigpy_device_from_quirk):
     assert call_args.args[0] == [expected]
     assert call_args.kwargs["manufacturer"] == 0x115F
 
-    # verify that the listener saw a schedule update.  depending on
-    # how the event is delivered, the second argument may *either* be the
-    # raw args dict (as happens when we manually fire the event during
-    # write_attributes) or a higher-level event structure containing an
-    # 'args' field (as when parsing a report).  check both.
     found = False
     for call in zha_listener.zha_send_event.mock_calls:
         if len(call.args) > 1 and isinstance(call.args[1], dict):
@@ -763,9 +758,61 @@ async def test_aqara_feeder_write_schedule(zigpy_device_from_quirk):
     assert found, "write_attributes did not fire schedule zha_event"
 
 
+async def test_aqara_feeder_time_response(zigpy_device_from_quirk):
+    """The custom Time cluster should return local time for this device."""
+
+    device = zigpy_device_from_quirk(AqaraFeederAcn001)
+    # accessing the time cluster via the endpoint attribute
+    time_cluster = device.endpoints[1].time
+    from zhaquirks.xiaomi.aqara.feeder_acn001 import FeederTimeCluster
+
+    assert isinstance(time_cluster, FeederTimeCluster)
+
+    # call the handler and compare with local-time calculation
+    retval = time_cluster.handle_read_attribute_time()
+    from datetime import datetime
+
+    from zigpy.zcl.clusters.general import UTC, ZIGBEE_EPOCH
+
+    now = datetime.now(UTC)
+    tz_offset = datetime.now().astimezone().utcoffset()
+    assert tz_offset is not None
+    expected = int((now + tz_offset - ZIGBEE_EPOCH).total_seconds())
+    assert abs(retval - expected) < 3
+
+
+async def test_aqara_feeder_opplecluster_registration():
+    """Our OppleCluster class should be registered globally for id 0xFCC0."""
+
+    import zigpy.zcl
+
+    from zhaquirks.xiaomi.aqara.feeder_acn001 import OppleCluster
+
+    assert zigpy.zcl.Cluster._registry[OppleCluster.cluster_id] is OppleCluster
+
+
+async def test_aqara_feeder_async_configure_patches(zigpy_device_from_quirk):
+    """Ensure existing generic clusters become OppleCluster and expose schedule."""
+
+    from zhaquirks.xiaomi.aqara.feeder_acn001 import AqaraFeederAcn001, OppleCluster
+
+    device = zigpy_device_from_quirk(AqaraFeederAcn001)
+    opple = device.endpoints[1].opple_cluster
+    # simulate an old generic instance by changing its class
+    class Generic(zigpy.zcl.Cluster):
+        cluster_id = OppleCluster.cluster_id
+
+    opple.__class__ = Generic
+    assert not isinstance(device.endpoints[1].opple_cluster, OppleCluster)
+
+    await device.async_configure()
+
+    assert isinstance(device.endpoints[1].opple_cluster, OppleCluster)
+    assert "schedule" in device.endpoints[1].opple_cluster.attributes_by_name
+
+
+
 # helper for constructing a fake attribute report event
-
-
 def _make_string_event(device, cluster, attr_id, value):
     from zigpy.zcl import AttributeReportedEvent, ClusterType
 
@@ -934,9 +981,6 @@ async def test_aqara_feeder_attr_reports(
         )
     )
 
-    # make sure no raw bytes (LVBytes) are leaked into zha events.  It is
-    # perfectly fine for non-bytes values such as ints or enums to be
-    # delivered, so we only flag the unsafe types.
     for call in zha_listener.zha_send_event.mock_calls:
         if len(call.args) > 1 and isinstance(call.args[1], dict):
             val = call.args[1].get(VALUE)

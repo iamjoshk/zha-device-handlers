@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from datetime import datetime
 import json
 import logging
 import string
@@ -10,8 +11,20 @@ from typing import Any, Final
 
 from zigpy import types
 from zigpy.profiles import zgp, zha
+
+import zigpy.zcl
 from zigpy.zcl import AttributeReportedEvent, AttributeUpdatedEvent, foundation
-from zigpy.zcl.clusters.general import Basic, Groups, Identify, OnOff, Ota, Scenes, Time
+from zigpy.zcl.clusters.general import (
+    UTC,
+    ZIGBEE_EPOCH,
+    Basic,
+    Groups,
+    Identify,
+    OnOff,
+    Ota,
+    Scenes,
+    Time,
+)
 from zigpy.zcl.clusters.greenpower import GreenPowerProxy
 from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef
 
@@ -31,7 +44,7 @@ from zhaquirks.const import (
     VALUE,
     ZHA_SEND_EVENT,
 )
-from zhaquirks.xiaomi import XiaomiAqaraE1Cluster, XiaomiCustomDevice
+from zhaquirks.xiaomi import AQARA, XiaomiAqaraE1Cluster, XiaomiCustomDevice
 
 # 32 bit signed integer values that are encoded in FEEDER_ATTR = 0xFFF1
 FEEDING = 0x04150055
@@ -102,6 +115,22 @@ ZCL_TO_AQARA: dict[int, int] = {
 }
 
 LOGGER = logging.getLogger(__name__)
+
+
+class FeederTimeCluster(Time):
+    """Time cluster that gives local time instead of UTC.
+
+    The feeder polls the time cluster during interview and expects the
+    value returned in the time attribute to already be adjusted to the
+    user's local timezone.
+    """
+
+    def handle_read_attribute_time(self) -> types.UTCTime:
+        """Return local-adjusted time value for the *time* attribute."""
+        now = datetime.now(UTC)
+        tz_offset = datetime.now().astimezone().utcoffset()
+        assert tz_offset is not None
+        return types.UTCTime((now + tz_offset - ZIGBEE_EPOCH).total_seconds())
 
 
 class FeedingSource(types.enum8):
@@ -244,7 +273,6 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
 
     def _parse_feeder_attribute(self, value: Any) -> None:
         """Parse the feeder attribute."""
-        # convert hex string back to bytes if necessary
         if isinstance(value, str):
             try:
                 value = bytes.fromhex(value)
@@ -521,13 +549,24 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         return await super().write_attributes(attrs, update_cache=False, **kwargs)
 
 
+# ensure this subclass is used for the manufacturer-specific cluster ID
+
+zigpy.zcl.Cluster._registry[0xFCC0] = OppleCluster
+
+
 class AqaraFeederAcn001(XiaomiCustomDevice):
     """Aqara aqara.feeder.acn001 custom device implementation."""
 
     async def async_configure(self) -> None:
-        """Perform post-setup configuration after endpoint/cluster setup."""
+
         if hasattr(super(), "async_configure"):
             await super().async_configure()
+
+        ep = self.endpoints.get(1)
+        if ep is not None:
+            cl = ep.in_clusters.get(OppleCluster.cluster_id)
+            if cl is not None and not isinstance(cl, OppleCluster):
+                cl.__class__ = OppleCluster
 
     signature = {
         MODEL: "aqara.feeder.acn001",
@@ -571,7 +610,7 @@ class AqaraFeederAcn001(XiaomiCustomDevice):
                     Groups.cluster_id,
                     Scenes.cluster_id,
                     OppleCluster,
-                    Time.cluster_id,
+                    FeederTimeCluster,
                 ],
                 OUTPUT_CLUSTERS: [
                     Identify.cluster_id,

@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import contextlib
-from datetime import datetime
 import json
 import logging
 import string
+
+from datetime import datetime
 from typing import Any, Final
 
 from zigpy import types
 from zigpy.profiles import zgp, zha
-
-import zigpy.zcl
 from zigpy.zcl import AttributeReportedEvent, AttributeUpdatedEvent, foundation
 from zigpy.zcl.clusters.general import (
     UTC,
@@ -28,7 +27,7 @@ from zigpy.zcl.clusters.general import (
 from zigpy.zcl.clusters.greenpower import GreenPowerProxy
 from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef
 
-from zhaquirks import EventableCluster
+from zhaquirks import EventableCluster, LocalDataCluster
 from zhaquirks.const import (
     ATTRIBUTE_ID,
     ATTRIBUTE_NAME,
@@ -117,8 +116,8 @@ ZCL_TO_AQARA: dict[int, int] = {
 LOGGER = logging.getLogger(__name__)
 
 
-class FeederTimeCluster(Time):
-    """Time cluster that gives local time instead of UTC.
+class FeederTimeCluster(LocalDataCluster, Time):
+    """Return local-adjusted time value for the *time* attribute.
 
     The feeder polls the time cluster during interview and expects the
     value returned in the time attribute to already be adjusted to the
@@ -136,6 +135,7 @@ class FeederTimeCluster(Time):
 class FeedingSource(types.enum8):
     """Feeding source."""
 
+    Schedule = 0x00
     Feeder = 0x01
     Remote = 0x02
 
@@ -227,6 +227,8 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         self, event: AttributeReportedEvent | AttributeUpdatedEvent
     ) -> None:
         """Handle attribute report/update event to parse feeder attribute."""
+        if event.attribute_id != FEEDER_ATTR:
+            return
         raw: bytes | None = None
         if isinstance(event.value, (bytes, types.LVBytes)):
             with contextlib.suppress(Exception):
@@ -299,6 +301,8 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
             return
 
         LOGGER.debug("OppleCluster._parse_feeder_attribute: length: %s", length)
+        if len(value) < 8 + length:
+            return
         attribute_value = value[8 : (length + 8)]
         LOGGER.debug("OppleCluster._parse_feeder_attribute: value: %s", attribute_value)
 
@@ -306,12 +310,28 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
             self._update_feeder_attribute(attribute, attribute_value)
         elif attribute == FEEDING_REPORT:
             attr_str = attribute_value.decode("utf-8")
-            feeding_source = attr_str[0:2]
-            feeding_size = attr_str[3:4]
-            self._update_attribute(
-                ZCL_LAST_FEEDING_SOURCE, FeedingSource(feeding_source)
+            feeding_source = FeedingSource(int(attr_str[0:2], 16))
+            feeding_size = int(attr_str[2:4], 16)
+            self._update_attribute(ZCL_LAST_FEEDING_SOURCE, feeding_source)
+            self._update_attribute(ZCL_LAST_FEEDING_SIZE, feeding_size)
+            self.listener_event(
+                ZHA_SEND_EVENT,
+                COMMAND_ATTRIBUTE_UPDATED,
+                {
+                    ATTRIBUTE_ID: ZCL_LAST_FEEDING_SOURCE,
+                    ATTRIBUTE_NAME: "last_feeding_source",
+                    VALUE: feeding_source.name,
+                },
             )
-            self._update_attribute(ZCL_LAST_FEEDING_SIZE, int(feeding_size, base=16))
+            self.listener_event(
+                ZHA_SEND_EVENT,
+                COMMAND_ATTRIBUTE_UPDATED,
+                {
+                    ATTRIBUTE_ID: ZCL_LAST_FEEDING_SIZE,
+                    ATTRIBUTE_NAME: "last_feeding_size",
+                    VALUE: feeding_size,
+                },
+            )
         elif attribute == PORTIONS_DISPENSED:
             portions_per_day, _ = types.uint16_t_be.deserialize(attribute_value)
             self._update_attribute(ZCL_PORTIONS_DISPENSED, portions_per_day)
@@ -339,7 +359,6 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         )
         self._send_sequence = ((self._send_sequence or 0) + 1) % 256
         val = bytes([0x00, 0x02, self._send_sequence])
-        self._send_sequence += 1
         val += types.int32s_be(attribute_id).serialize()
         if length is not None and value is not None:
             val += types.uint8_t(length).serialize()
@@ -539,7 +558,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
                 attribute, cooked_value = self._build_feeder_attribute(
                     ZCL_TO_AQARA[attr_id],
                     value,
-                    4 if attr_def.name in ["serving_size", "portion_weight"] else 1,
+                    4 if attr_def.name in ("serving_size", "portion_weight") else 1,
                 )
                 attrs[attribute] = cooked_value
             else:
@@ -549,18 +568,11 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         return await super().write_attributes(attrs, update_cache=False, **kwargs)
 
 
-# ensure this subclass is used for the manufacturer-specific cluster ID
-
-zigpy.zcl.Cluster._registry[0xFCC0] = OppleCluster
-
-
 class AqaraFeederAcn001(XiaomiCustomDevice):
     """Aqara aqara.feeder.acn001 custom device implementation."""
 
     async def async_configure(self) -> None:
-
-        if hasattr(super(), "async_configure"):
-            await super().async_configure()
+        await super().async_configure()
 
         ep = self.endpoints.get(1)
         if ep is not None:

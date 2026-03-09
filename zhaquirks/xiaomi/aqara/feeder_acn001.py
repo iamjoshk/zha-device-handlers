@@ -571,15 +571,6 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
 class AqaraFeederAcn001(XiaomiCustomDevice):
     """Aqara aqara.feeder.acn001 custom device implementation."""
 
-    async def async_configure(self) -> None:
-        await super().async_configure()
-
-        ep = self.endpoints.get(1)
-        if ep is not None:
-            cl = ep.in_clusters.get(OppleCluster.cluster_id)
-            if cl is not None and not isinstance(cl, OppleCluster):
-                cl.__class__ = OppleCluster
-
     signature = {
         MODEL: "aqara.feeder.acn001",
         ENDPOINTS: {

@@ -783,37 +783,6 @@ async def test_aqara_feeder_time_response(zigpy_device_from_quirk):
     assert abs(retval - expected) < 3
 
 
-async def test_aqara_feeder_opplecluster_registration():
-    """Our OppleCluster class should be registered globally for id 0xFCC0."""
-
-    import zigpy.zcl
-
-    from zhaquirks.xiaomi.aqara.feeder_acn001 import OppleCluster
-
-    assert zigpy.zcl.Cluster._registry[OppleCluster.cluster_id] is OppleCluster
-
-
-async def test_aqara_feeder_async_configure_patches(zigpy_device_from_quirk):
-    """Ensure existing generic clusters become OppleCluster and expose schedule."""
-
-    from zhaquirks.xiaomi.aqara.feeder_acn001 import AqaraFeederAcn001, OppleCluster
-
-    device = zigpy_device_from_quirk(AqaraFeederAcn001)
-    opple = device.endpoints[1].opple_cluster
-    # simulate an old generic instance by changing its class
-    class Generic(zigpy.zcl.Cluster):
-        cluster_id = OppleCluster.cluster_id
-
-    opple.__class__ = Generic
-    assert not isinstance(device.endpoints[1].opple_cluster, OppleCluster)
-
-    await device.async_configure()
-
-    assert isinstance(device.endpoints[1].opple_cluster, OppleCluster)
-    assert "schedule" in device.endpoints[1].opple_cluster.attributes_by_name
-
-
-
 # helper for constructing a fake attribute report event
 def _make_string_event(device, cluster, attr_id, value):
     from zigpy.zcl import AttributeReportedEvent, ClusterType

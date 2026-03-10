@@ -43,7 +43,7 @@ from zhaquirks.const import (
     VALUE,
     ZHA_SEND_EVENT,
 )
-from zhaquirks.xiaomi import AQARA, XiaomiAqaraE1Cluster, XiaomiCustomDevice
+from zhaquirks.xiaomi import XiaomiAqaraE1Cluster, XiaomiCustomDevice
 
 # 32 bit signed integer values that are encoded in FEEDER_ATTR = 0xFFF1
 FEEDING = 0x04150055
@@ -117,11 +117,12 @@ LOGGER = logging.getLogger(__name__)
 
 
 class FeederTimeCluster(LocalDataCluster, Time):
-    """Return local-adjusted time value for the *time* attribute.
+    """Use local time instead of UTC
 
     The feeder polls the time cluster during interview and expects the
     value returned in the time attribute to already be adjusted to the
-    user's local timezone.
+    user's local timezone. This benefits the onboard schedule, as well
+    as the weight and portions distributed per day, and the LED indicator.
     """
 
     def handle_read_attribute_time(self) -> types.UTCTime:

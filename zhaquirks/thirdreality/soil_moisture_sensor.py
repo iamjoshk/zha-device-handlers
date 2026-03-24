@@ -3,9 +3,10 @@
 from typing import Final
 
 from zigpy.quirks import CustomCluster
-from zigpy.quirks.v2 import NumberDeviceClass, QuirkBuilder
+from zigpy.quirks.v2 import NumberDeviceClass, QuirkBuilder, SensorDeviceClass
 from zigpy.quirks.v2.homeassistant import PERCENTAGE, UnitOfTemperature
 import zigpy.types as t
+from zigpy.zcl.clusters.measurement import RelativeHumidity
 from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef
 
 
@@ -40,6 +41,11 @@ class ThirdRealitySoilMoistureCluster(CustomCluster):
     QuirkBuilder("Third Reality, Inc", "3RSM0147Z")
     .applies_to("Third Reality, Inc", "3RSM0347Z")
     .replaces(ThirdRealitySoilMoistureCluster)
+    .change_entity_metadata(
+        endpoint_id=1,
+        cluster_id=RelativeHumidity.cluster_id,
+        new_device_class=SensorDeviceClass.MOISTURE,
+    )
     .number(
         attribute_name=ThirdRealitySoilMoistureCluster.AttributeDefs.temperature_offset_celsius.name,
         cluster_id=ThirdRealitySoilMoistureCluster.cluster_id,

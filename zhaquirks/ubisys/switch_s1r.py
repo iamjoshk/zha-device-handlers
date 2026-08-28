@@ -2,13 +2,14 @@
 
 from typing import Any, Final
 
-from zigpy.quirks import CustomCluster
-from zigpy.quirks.v2 import QuirkBuilder
+from zha.quirks import SE_POLL_SUMMATION
 import zigpy.types as t
 from zigpy.zcl.clusters.general import OnOff
 from zigpy.zcl.clusters.homeautomation import ElectricalMeasurement
 from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef
 
+from zhaquirks.builder import QuirkBuilder
+from zhaquirks.clusters import CustomCluster
 from zhaquirks.const import (
     BUTTON_1,
     BUTTON_2,
@@ -19,7 +20,6 @@ from zhaquirks.const import (
     TURN_OFF,
     TURN_ON,
 )
-from zhaquirks.quirk_ids import SE_POLL_SUMMATION
 from zhaquirks.ubisys import InputMode, UbisysCluster, UbisysInputConfigCluster
 
 
@@ -51,7 +51,7 @@ class UbisysS1RInputConfigCluster(UbisysInputConfigCluster):
         input_mode_2: Final = ZCLAttributeDef(id=0x0002, type=InputMode)
         detached_2: Final = ZCLAttributeDef(id=0x0003, type=t.Bool)
 
-    _ATTRIBUTE_DEFAULTS: dict[int, Any] = {
+    _DEFAULT_VALUES: dict[int, Any] = {
         AttributeDefs.input_mode_1.id: InputMode.Toggle,
         AttributeDefs.detached_1.id: t.Bool.false,
         AttributeDefs.input_mode_2.id: InputMode.Toggle,

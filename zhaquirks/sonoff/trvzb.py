@@ -1,10 +1,15 @@
 """Sonoff TRVZB - Zigbee Thermostatic Radiator Valve."""
 
-from zigpy.quirks import CustomCluster
-from zigpy.quirks.v2 import NumberDeviceClass, QuirkBuilder
-from zigpy.quirks.v2.homeassistant import UnitOfTemperature, UnitOfTime
 import zigpy.types as t
 from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef
+
+from zhaquirks.builder import (
+    NumberDeviceClass,
+    QuirkBuilder,
+    UnitOfTemperature,
+    UnitOfTime,
+)
+from zhaquirks.clusters import CustomCluster
 
 
 class CustomSonoffCluster(CustomCluster):
@@ -209,7 +214,7 @@ class CustomSonoffCluster(CustomCluster):
         min_value=-1.0,
         max_value=-0.2,
         step=0.2,
-        device_class=NumberDeviceClass.TEMPERATURE,
+        device_class=NumberDeviceClass.TEMPERATURE_DELTA,
         unit=UnitOfTemperature.CELSIUS,
         multiplier=0.01,
         translation_key="temperature_control_accuracy",

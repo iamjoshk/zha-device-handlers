@@ -4,18 +4,7 @@ import asyncio
 import logging
 from typing import Final
 
-from zigpy.quirks import CustomCluster
-from zigpy.quirks.v2 import QuirkBuilder
-from zigpy.quirks.v2.homeassistant import (
-    DEGREE,
-    PERCENTAGE,
-    EntityPlatform,
-    EntityType,
-    UnitOfLength,
-    UnitOfPower,
-    UnitOfTime,
-)
-from zigpy.quirks.v2.homeassistant.number import NumberDeviceClass
+from zha.quirks import SE_POLL_SUMMATION
 import zigpy.types as t
 from zigpy.zcl import (
     AttributeReportedEvent,
@@ -32,7 +21,18 @@ from zigpy.zcl.foundation import (
 )
 
 from zhaquirks import LocalDataCluster
-from zhaquirks.quirk_ids import SE_POLL_SUMMATION
+from zhaquirks.builder import (
+    DEGREE,
+    PERCENTAGE,
+    EntityPlatform,
+    EntityType,
+    NumberDeviceClass,
+    QuirkBuilder,
+    UnitOfLength,
+    UnitOfPower,
+    UnitOfTime,
+)
+from zhaquirks.clusters import CustomCluster
 from zhaquirks.ubisys import UbisysCluster, UbisysInputConfigCluster
 
 _LOGGER = logging.getLogger(__name__)
@@ -190,12 +190,9 @@ class UbisysJ1CalibrationCluster(LocalDataCluster):
         exit_calibration_mode: Final = ZCLAttributeDef(id=0x0003, type=t.Bool)
         calibration_state: Final = ZCLAttributeDef(id=0x0004, type=CalibrationState)
 
-    def __init__(self, *args, **kwargs):
-        """Init with calibration state set to Idle."""
-        super().__init__(*args, **kwargs)
-        self._update_attribute(
-            self.AttributeDefs.calibration_state, CalibrationState.Idle
-        )
+    _DEFAULT_VALUES = {
+        AttributeDefs.calibration_state.id: CalibrationState.Idle,
+    }
 
     def _set_state(self, state: CalibrationState) -> None:
         """Update the calibration state attribute."""

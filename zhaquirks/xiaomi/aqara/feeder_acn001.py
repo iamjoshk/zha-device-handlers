@@ -3,47 +3,35 @@
 from __future__ import annotations
 
 import contextlib
+from datetime import datetime
 import json
 import logging
 import string
-
-from datetime import datetime
 from typing import Any, Final
 
 from zigpy import types
-from zigpy.profiles import zgp, zha
 from zigpy.zcl import AttributeReportedEvent, AttributeUpdatedEvent, foundation
-from zigpy.zcl.clusters.general import (
-    UTC,
-    ZIGBEE_EPOCH,
-    Basic,
-    Groups,
-    Identify,
-    OnOff,
-    Ota,
-    Scenes,
-    Time,
-)
-from zigpy.zcl.clusters.greenpower import GreenPowerProxy
+from zigpy.zcl.clusters.general import UTC, ZIGBEE_EPOCH, OnOff, Time
 from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef
 
 from zhaquirks import EventableCluster, LocalDataCluster
+from zhaquirks.builder import (
+    BinarySensorDeviceClass,
+    EntityPlatform,
+    EntityType,
+    QuirkBuilder,
+    SensorStateClass,
+    UnitOfMass,
+)
 from zhaquirks.const import (
     ATTRIBUTE_ID,
     ATTRIBUTE_NAME,
     COMMAND_ATTRIBUTE_UPDATED,
-    DEVICE_TYPE,
-    ENDPOINTS,
-    INPUT_CLUSTERS,
-    MANUFACTURER,
-    MODEL,
-    OUTPUT_CLUSTERS,
-    PROFILE_ID,
     UNKNOWN,
     VALUE,
     ZHA_SEND_EVENT,
 )
-from zhaquirks.xiaomi import XiaomiAqaraE1Cluster, XiaomiCustomDevice
+from zhaquirks.xiaomi import XiaomiAqaraE1Cluster
 
 # 32 bit signed integer values that are encoded in FEEDER_ATTR = 0xFFF1
 FEEDING = 0x04150055
@@ -117,7 +105,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class FeederTimeCluster(LocalDataCluster, Time):
-    """Use local time instead of UTC
+    """Use local time instead of UTC.
 
     The feeder polls the time cluster during interview and expects the
     value returned in the time attribute to already be adjusted to the
@@ -134,11 +122,16 @@ class FeederTimeCluster(LocalDataCluster, Time):
 
 
 class FeedingSource(types.enum8):
-    """Feeding source."""
+    """Feeding source.
+
+    Schedule = onboard schedule,
+    Feeder = feed button on feeder,
+    HomeAssistant = feed button (including automations) in HA
+    """
 
     Schedule = 0x00
     Feeder = 0x01
-    Remote = 0x02
+    HomeAssistant = 0x02
 
 
 class FeedingMode(types.enum8):
@@ -569,65 +562,114 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         return await super().write_attributes(attrs, update_cache=False, **kwargs)
 
 
-class AqaraFeederAcn001(XiaomiCustomDevice):
-    """Aqara aqara.feeder.acn001 custom device implementation."""
-
-    signature = {
-        MODEL: "aqara.feeder.acn001",
-        ENDPOINTS: {
-            1: {
-                PROFILE_ID: zha.PROFILE_ID,
-                DEVICE_TYPE: zha.DeviceType.ON_OFF_OUTPUT,
-                INPUT_CLUSTERS: [
-                    Basic.cluster_id,
-                    Identify.cluster_id,
-                    Groups.cluster_id,
-                    Scenes.cluster_id,
-                    OnOff.cluster_id,
-                    OppleCluster.cluster_id,
-                ],
-                OUTPUT_CLUSTERS: [
-                    Identify.cluster_id,
-                    Ota.cluster_id,
-                ],
-            },
-            242: {
-                PROFILE_ID: zgp.PROFILE_ID,
-                DEVICE_TYPE: zgp.DeviceType.PROXY_BASIC,
-                INPUT_CLUSTERS: [],
-                OUTPUT_CLUSTERS: [
-                    GreenPowerProxy.cluster_id,
-                ],
-            },
-        },
-    }
-
-    replacement = {
-        MANUFACTURER: "Aqara",
-        ENDPOINTS: {
-            1: {
-                PROFILE_ID: zha.PROFILE_ID,
-                DEVICE_TYPE: zha.DeviceType.ON_OFF_OUTPUT,
-                INPUT_CLUSTERS: [
-                    Basic.cluster_id,
-                    Identify.cluster_id,
-                    Groups.cluster_id,
-                    Scenes.cluster_id,
-                    OppleCluster,
-                    FeederTimeCluster,
-                ],
-                OUTPUT_CLUSTERS: [
-                    Identify.cluster_id,
-                    Ota.cluster_id,
-                ],
-            },
-            242: {
-                PROFILE_ID: zgp.PROFILE_ID,
-                DEVICE_TYPE: zgp.DeviceType.PROXY_BASIC,
-                INPUT_CLUSTERS: [],
-                OUTPUT_CLUSTERS: [
-                    GreenPowerProxy.cluster_id,
-                ],
-            },
-        },
-    }
+(
+    QuirkBuilder(None, "aqara.feeder.acn001")
+    .friendly_name(manufacturer="Aqara", model="aqara.feeder.acn001")
+    .removes(OnOff.cluster_id)
+    .replaces(OppleCluster)
+    .adds(FeederTimeCluster)
+    .enum(
+        attribute_name=OppleCluster.AttributeDefs.last_feeding_source.name,
+        enum_class=FeedingSource,
+        cluster_id=OppleCluster.cluster_id,
+        entity_platform=EntityPlatform.SENSOR,
+        entity_type=EntityType.STANDARD,
+        unique_id_suffix="64704-last_feeding_source",
+        translation_key="last_feeding_source",
+        fallback_name="Last feeding source",
+    )
+    .sensor(
+        attribute_name=OppleCluster.AttributeDefs.last_feeding_size.name,
+        cluster_id=OppleCluster.cluster_id,
+        unique_id_suffix="64704-last_feeding_size",
+        translation_key="last_feeding_size",
+        fallback_name="Last feeding size",
+    )
+    .sensor(
+        attribute_name=OppleCluster.AttributeDefs.portions_dispensed.name,
+        cluster_id=OppleCluster.cluster_id,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        unique_id_suffix="64704-portions_dispensed",
+        translation_key="portions_dispensed_today",
+        fallback_name="Portions dispensed today",
+    )
+    .sensor(
+        attribute_name=OppleCluster.AttributeDefs.weight_dispensed.name,
+        cluster_id=OppleCluster.cluster_id,
+        unit=UnitOfMass.GRAMS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        unique_id_suffix="64704-weight_dispensed",
+        translation_key="weight_dispensed_today",
+        fallback_name="Weight dispensed today",
+    )
+    .switch(
+        attribute_name=OppleCluster.AttributeDefs.disable_led_indicator.name,
+        cluster_id=OppleCluster.cluster_id,
+        force_inverted=True,
+        unique_id_suffix="64704-disable_led_indicator",
+        translation_key="led_indicator",
+        fallback_name="LED indicator",
+    )
+    .switch(
+        attribute_name=OppleCluster.AttributeDefs.child_lock.name,
+        cluster_id=OppleCluster.cluster_id,
+        unique_id_suffix="64704-child_lock",
+        translation_key="child_lock",
+        fallback_name="Child lock",
+    )
+    .enum(
+        attribute_name=OppleCluster.AttributeDefs.feeding_mode.name,
+        enum_class=FeedingMode,
+        cluster_id=OppleCluster.cluster_id,
+        unique_id_suffix="64704-feeding_mode",
+        translation_key="feeding_mode",
+        fallback_name="Feeding mode",
+    )
+    .number(
+        attribute_name=OppleCluster.AttributeDefs.serving_size.name,
+        cluster_id=OppleCluster.cluster_id,
+        min_value=1,
+        max_value=10,
+        mode="box",
+        unique_id_suffix="64704-serving_size",
+        translation_key="serving_size",
+        fallback_name="Serving size",
+    )
+    .number(
+        attribute_name=OppleCluster.AttributeDefs.portion_weight.name,
+        cluster_id=OppleCluster.cluster_id,
+        min_value=1,
+        max_value=100,
+        unit=UnitOfMass.GRAMS,
+        mode="box",
+        unique_id_suffix="64704-portion_weight",
+        translation_key="portion_weight",
+        fallback_name="Portion weight",
+    )
+    .binary_sensor(
+        attribute_name=OppleCluster.AttributeDefs.error_detected.name,
+        cluster_id=OppleCluster.cluster_id,
+        entity_type=EntityType.STANDARD,
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        unique_id_suffix="64704-error_detected",
+        fallback_name="Error detected",
+    )
+    .sensor(
+        attribute_name=OppleCluster.AttributeDefs.schedule.name,
+        cluster_id=OppleCluster.cluster_id,
+        entity_type=EntityType.DIAGNOSTIC,
+        unique_id_suffix="64704-schedule",
+        translation_key="schedule",
+        fallback_name="Schedule",
+    )
+    .write_attr_button(
+        attribute_name=OppleCluster.AttributeDefs.feeding.name,
+        attribute_value=1,
+        cluster_id=OppleCluster.cluster_id,
+        entity_type=EntityType.STANDARD,
+        unique_id_suffix="64704-feeding",
+        translation_key="feed",
+        fallback_name="Feed",
+    )
+    .add_to_registry()
+)

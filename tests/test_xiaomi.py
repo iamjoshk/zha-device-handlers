@@ -1,6 +1,7 @@
 """Tests for xiaomi."""
 
 import asyncio
+from datetime import datetime
 import json
 import logging
 import math
@@ -20,6 +21,8 @@ from zigpy.zcl import (
 )
 from zigpy.zcl.clusters.closures import WindowCovering
 from zigpy.zcl.clusters.general import (
+    UTC,
+    ZIGBEE_EPOCH,
     AnalogInput,
     AnalogOutput,
     DeviceTemperature,
@@ -92,9 +95,10 @@ from zhaquirks.xiaomi.aqara.feeder_acn001 import (
     ZCL_SCHEDULE,
     ZCL_SERVING_SIZE,
     ZCL_WEIGHT_DISPENSED,
-    AqaraFeederAcn001,
+    FeederTimeCluster,
     FeedingMode,
     FeedingSource,
+    OppleCluster,
 )
 from zhaquirks.xiaomi.aqara.light_acn import AqaraLightT1M, LumiPowerOnStateMode
 import zhaquirks.xiaomi.aqara.magnet_ac01
@@ -1076,11 +1080,20 @@ async def test_xiaomi_total_active_power_clear(zigpy_device_from_quirk):
     ],
 )
 async def test_aqara_feeder_write_attrs(
-    zigpy_device_from_quirk, attribute, value, expected_bytes
+    zigpy_device_from_v2_quirk, attribute, value, expected_bytes
 ):
     """Test Aqara C1 pet feeder attr writing."""
 
-    device = zigpy_device_from_quirk(AqaraFeederAcn001)
+    device = zigpy_device_from_v2_quirk(
+        "Aqara",
+        "aqara.feeder.acn001",
+        cluster_ids={
+            1: {
+                OnOff.cluster_id: ClusterType.Server,
+                OppleCluster.cluster_id: ClusterType.Server,
+            }
+        },
+    )
     opple_cluster = device.endpoints[1].opple_cluster
     opple_cluster._write_attributes = mock.AsyncMock(
         return_value=[
@@ -1103,10 +1116,19 @@ async def test_aqara_feeder_write_attrs(
     assert call_args.kwargs["manufacturer"] == 0x115F
 
 
-async def test_aqara_feeder_write_schedule(zigpy_device_from_quirk):
+async def test_aqara_feeder_write_schedule(zigpy_device_from_v2_quirk):
     """Verify that schedule attribute is encoded and sent correctly."""
 
-    device = zigpy_device_from_quirk(AqaraFeederAcn001)
+    device = zigpy_device_from_v2_quirk(
+        "Aqara",
+        "aqara.feeder.acn001",
+        cluster_ids={
+            1: {
+                OnOff.cluster_id: ClusterType.Server,
+                OppleCluster.cluster_id: ClusterType.Server,
+            }
+        },
+    )
     opple_cluster = device.endpoints[1].opple_cluster
     opple_cluster._write_attributes = mock.AsyncMock(
         return_value=[
@@ -1156,21 +1178,26 @@ async def test_aqara_feeder_write_schedule(zigpy_device_from_quirk):
     assert found, "write_attributes did not fire schedule zha_event"
 
 
-async def test_aqara_feeder_time_response(zigpy_device_from_quirk):
+async def test_aqara_feeder_time_response(zigpy_device_from_v2_quirk):
     """The custom Time cluster should return local time for this device."""
 
-    device = zigpy_device_from_quirk(AqaraFeederAcn001)
+    device = zigpy_device_from_v2_quirk(
+        "Aqara",
+        "aqara.feeder.acn001",
+        cluster_ids={
+            1: {
+                OnOff.cluster_id: ClusterType.Server,
+                OppleCluster.cluster_id: ClusterType.Server,
+            }
+        },
+    )
     # accessing the time cluster via the endpoint attribute
     time_cluster = device.endpoints[1].time
-    from zhaquirks.xiaomi.aqara.feeder_acn001 import FeederTimeCluster
 
     assert isinstance(time_cluster, FeederTimeCluster)
 
     # call the handler and compare with local-time calculation
     retval = time_cluster.handle_read_attribute_time()
-    from datetime import datetime
-
-    from zigpy.zcl.clusters.general import UTC, ZIGBEE_EPOCH
 
     now = datetime.now(UTC)
     tz_offset = datetime.now().astimezone().utcoffset()
@@ -1181,7 +1208,6 @@ async def test_aqara_feeder_time_response(zigpy_device_from_quirk):
 
 # helper for constructing a fake attribute report event
 def _make_string_event(device, cluster, attr_id, value):
-    from zigpy.zcl import AttributeReportedEvent, ClusterType
 
     return AttributeReportedEvent(
         device_ieee=device.ieee,
@@ -1196,10 +1222,19 @@ def _make_string_event(device, cluster, attr_id, value):
     )
 
 
-async def test_aqara_feeder_string_event_is_ignored(zigpy_device_from_quirk):
+async def test_aqara_feeder_string_event_is_ignored(zigpy_device_from_v2_quirk):
     """Providing a string value should not crash the parser."""
 
-    device = zigpy_device_from_quirk(AqaraFeederAcn001)
+    device = zigpy_device_from_v2_quirk(
+        "Aqara",
+        "aqara.feeder.acn001",
+        cluster_ids={
+            1: {
+                OnOff.cluster_id: ClusterType.Server,
+                OppleCluster.cluster_id: ClusterType.Server,
+            }
+        },
+    )
     opple = device.endpoints[1].opple_cluster
 
     # populate schedule cache so we can verify it is untouched
@@ -1228,7 +1263,9 @@ async def test_aqara_feeder_string_event_is_ignored(zigpy_device_from_quirk):
             3,
             [
                 mock.call(ZCL_LAST_FEEDING_SIZE, 3, mock.ANY),
-                mock.call(ZCL_LAST_FEEDING_SOURCE, FeedingSource.Remote, mock.ANY),
+                mock.call(
+                    ZCL_LAST_FEEDING_SOURCE, FeedingSource.HomeAssistant, mock.ANY
+                ),
                 mock.call(
                     FEEDER_ATTR, b"\x00\x05\xd0\x04\x15\x02\xbc\x040203", mock.ANY
                 ),
@@ -1321,10 +1358,19 @@ async def test_aqara_feeder_string_event_is_ignored(zigpy_device_from_quirk):
     ],
 )
 async def test_aqara_feeder_attr_reports(
-    zigpy_device_from_quirk, bytes_received, call_count, calls
+    zigpy_device_from_v2_quirk, bytes_received, call_count, calls
 ):
     """Test Aqara C1 pet feeder attr reports and parsing."""
-    device = zigpy_device_from_quirk(AqaraFeederAcn001)
+    device = zigpy_device_from_v2_quirk(
+        "Aqara",
+        "aqara.feeder.acn001",
+        cluster_ids={
+            1: {
+                OnOff.cluster_id: ClusterType.Server,
+                OppleCluster.cluster_id: ClusterType.Server,
+            }
+        },
+    )
     opple_cluster = device.endpoints[1].opple_cluster
 
     # listen for attributes and fired zha events

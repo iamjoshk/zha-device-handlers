@@ -7,7 +7,7 @@ from typing import Any, Final
 
 from zigpy import types
 from zigpy.zcl import AttributeReportedEvent, AttributeUpdatedEvent, foundation
-from zigpy.zcl.clusters.general import OnOff
+from zigpy.zcl.clusters.general import OnOff, Time
 from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef
 
 from zhaquirks.builder import (
@@ -268,6 +268,7 @@ class OppleCluster(XiaomiAqaraE1Cluster):
     QuirkBuilder(None, "aqara.feeder.acn001")
     .friendly_name(manufacturer="Aqara", model="aqara.feeder.acn001")
     .removes(OnOff.cluster_id)
+    .replaces(Time)
     .replaces(OppleCluster)
     .enum(
         attribute_name=OppleCluster.AttributeDefs.last_feeding_source.name,

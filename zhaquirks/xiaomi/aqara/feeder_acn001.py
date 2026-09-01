@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-import contextlib
-import json
 import logging
-import string
-
-from datetime import datetime
 from typing import Any, Final
 
 from zigpy import types
 from zigpy.zcl import AttributeReportedEvent, AttributeUpdatedEvent, foundation
-from zigpy.zcl.clusters.general import UTC, ZIGBEE_EPOCH, OnOff, Time
+from zigpy.zcl.clusters.general import OnOff
 from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef
 
 from zhaquirks.builder import (
@@ -22,14 +17,6 @@ from zhaquirks.builder import (
     QuirkBuilder,
     SensorStateClass,
     UnitOfMass,
-)
-from zhaquirks.const import (
-    ATTRIBUTE_ID,
-    ATTRIBUTE_NAME,
-    COMMAND_ATTRIBUTE_UPDATED,
-    UNKNOWN,
-    VALUE,
-    ZHA_SEND_EVENT,
 )
 from zhaquirks.xiaomi import XiaomiAqaraE1Cluster
 

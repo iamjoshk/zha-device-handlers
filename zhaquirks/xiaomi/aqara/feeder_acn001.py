@@ -415,6 +415,12 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
                             )
                     except ValueError:
                         continue
+            if not schedules:
+                LOGGER.warning(
+                    "OppleCluster._parse_schedule: invalid schedule payload: %s",
+                    value,
+                )
+                return
             self._update_attribute(
                 ZCL_SCHEDULE, json.dumps(schedules, separators=(",", ":"))
             )

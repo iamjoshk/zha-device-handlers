@@ -1178,6 +1178,65 @@ async def test_aqara_feeder_write_schedule(zigpy_device_from_v2_quirk):
     assert found, "write_attributes did not fire schedule zha_event"
 
 
+async def test_aqara_feeder_schedule_sensor(zigpy_device_from_v2_quirk):
+    """Test Aqara C1 pet feeder schedule sensor state."""
+
+    device = zigpy_device_from_v2_quirk(
+        "Aqara",
+        "aqara.feeder.acn001",
+        cluster_ids={
+            1: {
+                OnOff.cluster_id: ClusterType.Server,
+                OppleCluster.cluster_id: ClusterType.Server,
+            }
+        },
+    )
+    opple_cluster = device.endpoints[1].opple_cluster
+
+    device.packet_received(
+        t.ZigbeePacket(
+            profile_id=zha.PROFILE_ID,
+            cluster_id=opple_cluster.cluster_id,
+            src_ep=opple_cluster.endpoint.endpoint_id,
+            dst_ep=opple_cluster.endpoint.endpoint_id,
+            data=t.SerializableBytes(
+                b"\x1c_\x11}\n\xf1\xffA(\x00\x05\x15\x08\x00\x08\xc8 "
+                b"7F09000100,7F0D000100,7F13000100"
+            ),
+        )
+    )
+
+    assert opple_cluster[ZCL_SCHEDULE] == (
+        '[{"days":"everyday","hour":9,"minute":0,"portions":1},'
+        '{"days":"everyday","hour":13,"minute":0,"portions":1},'
+        '{"days":"everyday","hour":19,"minute":0,"portions":1}]'
+    )
+
+
+async def test_aqara_feeder_malformed_schedule_is_ignored(
+    zigpy_device_from_v2_quirk,
+):
+    """Test Aqara C1 pet feeder ignores malformed schedule payloads."""
+
+    device = zigpy_device_from_v2_quirk(
+        "Aqara",
+        "aqara.feeder.acn001",
+        cluster_ids={
+            1: {
+                OnOff.cluster_id: ClusterType.Server,
+                OppleCluster.cluster_id: ClusterType.Server,
+            }
+        },
+    )
+    opple_cluster = device.endpoints[1].opple_cluster
+    schedule = '[{"days":"everyday","hour":9,"minute":0,"portions":1}]'
+    opple_cluster._update_attribute(ZCL_SCHEDULE, schedule)
+
+    opple_cluster._parse_schedule(b"not-a-valid-schedule")
+
+    assert opple_cluster[ZCL_SCHEDULE] == schedule
+
+
 async def test_aqara_feeder_time_response(zigpy_device_from_v2_quirk):
     """The custom Time cluster should return local time for this device."""
 

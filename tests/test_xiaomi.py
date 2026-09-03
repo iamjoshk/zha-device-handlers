@@ -79,6 +79,7 @@ import zhaquirks.xiaomi.aqara.cube_aqgl01
 import zhaquirks.xiaomi.aqara.driver_curtain_e1
 from zhaquirks.xiaomi.aqara.feeder_acn001 import (
     FEEDER_ATTR,
+    ZCL_BATTERY_MODE,
     ZCL_CHILD_LOCK,
     ZCL_DISABLE_LED_INDICATOR,
     ZCL_ERROR_DETECTED,
@@ -1079,7 +1080,7 @@ async def test_aqara_feeder_write_attrs(
     """Test Aqara C1 pet feeder attr writing."""
 
     device = zigpy_device_from_v2_quirk(
-        "Aqara",
+        None,
         "aqara.feeder.acn001",
         cluster_ids={
             1: {
@@ -1161,6 +1162,14 @@ async def test_aqara_feeder_write_attrs(
             ],
         ),
         (
+            b"\x1c_\x11o\n\xf1\xffA\t\x00\x05\xd3\r\t\x00U\x01\x00",
+            2,
+            [
+                mock.call(ZCL_BATTERY_MODE, False, mock.ANY),
+                mock.call(FEEDER_ATTR, b"\x00\x05\xd3\r\t\x00U\x01\x00", mock.ANY),
+            ],
+        ),
+        (
             b"\x1c_\x11p\n\xf1\xffA\t\x00\x05\x05\x04\x16\x00U\x01\x01",
             2,
             [
@@ -1225,7 +1234,7 @@ async def test_aqara_feeder_attr_reports(
 ):
     """Test Aqara C1 pet feeder attr reports and parsing."""
     device = zigpy_device_from_v2_quirk(
-        "Aqara",
+        None,
         "aqara.feeder.acn001",
         cluster_ids={
             1: {

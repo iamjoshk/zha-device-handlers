@@ -266,6 +266,9 @@ class OppleCluster(XiaomiAqaraE1Cluster):
 
 (
     QuirkBuilder(None, "aqara.feeder.acn001")
+    # device does not provide manufacturer during interview
+    # The v2 entities only take over cleanly once the
+    # native classes are removed (zigpy/zha#883) if the model string matches.
     .friendly_name(manufacturer="Aqara", model="aqara.feeder.acn001")
     .removes(OnOff.cluster_id)
     .replaces(Time)
@@ -276,14 +279,14 @@ class OppleCluster(XiaomiAqaraE1Cluster):
         cluster_id=OppleCluster.cluster_id,
         entity_platform=EntityPlatform.SENSOR,
         entity_type=EntityType.STANDARD,
-        unique_id_suffix="64704-last_feeding_source",
+        unique_id_suffix=f"{OppleCluster.cluster_id}-last_feeding_source",
         translation_key="last_feeding_source",
         fallback_name="Last feeding source",
     )
     .sensor(
         attribute_name=OppleCluster.AttributeDefs.last_feeding_size.name,
         cluster_id=OppleCluster.cluster_id,
-        unique_id_suffix="64704-last_feeding_size",
+        unique_id_suffix=f"{OppleCluster.cluster_id}-last_feeding_size",
         translation_key="last_feeding_size",
         fallback_name="Last feeding size",
     )
@@ -291,7 +294,7 @@ class OppleCluster(XiaomiAqaraE1Cluster):
         attribute_name=OppleCluster.AttributeDefs.portions_dispensed.name,
         cluster_id=OppleCluster.cluster_id,
         state_class=SensorStateClass.TOTAL_INCREASING,
-        unique_id_suffix="64704-portions_dispensed",
+        unique_id_suffix=f"{OppleCluster.cluster_id}-portions_dispensed",
         translation_key="portions_dispensed_today",
         fallback_name="Portions dispensed today",
     )
@@ -300,7 +303,7 @@ class OppleCluster(XiaomiAqaraE1Cluster):
         cluster_id=OppleCluster.cluster_id,
         unit=UnitOfMass.GRAMS,
         state_class=SensorStateClass.TOTAL_INCREASING,
-        unique_id_suffix="64704-weight_dispensed",
+        unique_id_suffix=f"{OppleCluster.cluster_id}-weight_dispensed",
         translation_key="weight_dispensed_today",
         fallback_name="Weight dispensed today",
     )
@@ -308,14 +311,14 @@ class OppleCluster(XiaomiAqaraE1Cluster):
         attribute_name=OppleCluster.AttributeDefs.disable_led_indicator.name,
         cluster_id=OppleCluster.cluster_id,
         force_inverted=True,
-        unique_id_suffix="64704-disable_led_indicator",
+        unique_id_suffix=f"{OppleCluster.cluster_id}-disable_led_indicator",
         translation_key="led_indicator",
         fallback_name="LED indicator",
     )
     .switch(
         attribute_name=OppleCluster.AttributeDefs.child_lock.name,
         cluster_id=OppleCluster.cluster_id,
-        unique_id_suffix="64704-child_lock",
+        unique_id_suffix=f"{OppleCluster.cluster_id}-child_lock",
         translation_key="child_lock",
         fallback_name="Child lock",
     )
@@ -323,7 +326,7 @@ class OppleCluster(XiaomiAqaraE1Cluster):
         attribute_name=OppleCluster.AttributeDefs.feeding_mode.name,
         enum_class=FeedingMode,
         cluster_id=OppleCluster.cluster_id,
-        unique_id_suffix="64704-feeding_mode",
+        unique_id_suffix=f"{OppleCluster.cluster_id}-feeding_mode",
         translation_key="feeding_mode",
         fallback_name="Feeding mode",
     )
@@ -333,7 +336,7 @@ class OppleCluster(XiaomiAqaraE1Cluster):
         min_value=1,
         max_value=10,
         mode="box",
-        unique_id_suffix="64704-serving_size",
+        unique_id_suffix=f"{OppleCluster.cluster_id}-serving_size",
         translation_key="serving_size",
         fallback_name="Serving size",
     )
@@ -344,7 +347,7 @@ class OppleCluster(XiaomiAqaraE1Cluster):
         max_value=100,
         unit=UnitOfMass.GRAMS,
         mode="box",
-        unique_id_suffix="64704-portion_weight",
+        unique_id_suffix=f"{OppleCluster.cluster_id}-portion_weight",
         translation_key="portion_weight",
         fallback_name="Portion weight",
     )
@@ -353,7 +356,7 @@ class OppleCluster(XiaomiAqaraE1Cluster):
         cluster_id=OppleCluster.cluster_id,
         entity_type=EntityType.STANDARD,
         device_class=BinarySensorDeviceClass.PROBLEM,
-        unique_id_suffix="64704-error_detected",
+        unique_id_suffix=f"{OppleCluster.cluster_id}-error_detected",
         fallback_name="Error detected",
     )
     .write_attr_button(
@@ -361,7 +364,7 @@ class OppleCluster(XiaomiAqaraE1Cluster):
         attribute_value=1,
         cluster_id=OppleCluster.cluster_id,
         entity_type=EntityType.STANDARD,
-        unique_id_suffix="64704-feeding",
+        unique_id_suffix=f"{OppleCluster.cluster_id}-feeding",
         translation_key="feed",
         fallback_name="Feed",
     )

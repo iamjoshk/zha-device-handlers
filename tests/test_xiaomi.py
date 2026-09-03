@@ -1079,7 +1079,7 @@ async def test_aqara_feeder_write_attrs(
     """Test Aqara C1 pet feeder attr writing."""
 
     device = zigpy_device_from_v2_quirk(
-        "Aqara",
+        None,
         "aqara.feeder.acn001",
         cluster_ids={
             1: {
@@ -1225,7 +1225,7 @@ async def test_aqara_feeder_attr_reports(
 ):
     """Test Aqara C1 pet feeder attr reports and parsing."""
     device = zigpy_device_from_v2_quirk(
-        "Aqara",
+        None,
         "aqara.feeder.acn001",
         cluster_ids={
             1: {

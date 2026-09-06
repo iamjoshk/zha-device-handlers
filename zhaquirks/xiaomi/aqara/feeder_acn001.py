@@ -15,10 +15,12 @@ from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef
 
 from zhaquirks import EventableCluster, LocalDataCluster
 from zhaquirks.builder import (
+    PERCENTAGE,
     BinarySensorDeviceClass,
     EntityPlatform,
     EntityType,
     QuirkBuilder,
+    SensorDeviceClass,
     SensorStateClass,
     UnitOfMass,
 )
@@ -45,6 +47,7 @@ FEEDING_MODE = 0x04180055
 SERVING_SIZE = 0x0E5C0055
 PORTION_WEIGHT = 0x0E5F0055
 BATTERY_MODE = 0x0D090055
+BATTERY_LEVEL = 0x080007D1
 
 FEEDER_ATTR = 0xFFF1
 FEEDER_ATTR_NAME = "feeder_attr"
@@ -85,6 +88,7 @@ ZCL_SERVING_SIZE = 0x1391
 ZCL_PORTION_WEIGHT = 0x1392
 ZCL_SCHEDULE = 0x1393
 ZCL_BATTERY_MODE = 0x1394
+ZCL_BATTERY_LEVEL = 0x1395
 
 AQARA_TO_ZCL: dict[int, int] = {
     FEEDING: ZCL_FEEDING,
@@ -95,6 +99,7 @@ AQARA_TO_ZCL: dict[int, int] = {
     SERVING_SIZE: ZCL_SERVING_SIZE,
     PORTION_WEIGHT: ZCL_PORTION_WEIGHT,
     BATTERY_MODE: ZCL_BATTERY_MODE,
+    BATTERY_LEVEL: ZCL_BATTERY_LEVEL,
 }
 
 ZCL_TO_AQARA: dict[int, int] = {
@@ -107,6 +112,7 @@ ZCL_TO_AQARA: dict[int, int] = {
     ZCL_ERROR_DETECTED: ERROR_DETECTED,
     ZCL_SCHEDULE: SCHEDULING_STRING,
     ZCL_BATTERY_MODE: BATTERY_MODE,
+    ZCL_BATTERY_LEVEL: BATTERY_LEVEL,
 }
 
 LOGGER = logging.getLogger(__name__)
@@ -193,15 +199,16 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
             id=ZCL_PORTION_WEIGHT, type=types.uint8_t, manufacturer_code=0x115F
         )
         schedule: Final = ZCLAttributeDef(
-            id=ZCL_SCHEDULE,
-            type=types.CharacterString,
-            manufacturer_code=0x115F,
+            id=ZCL_SCHEDULE, type=types.CharacterString, manufacturer_code=0x115F
         )
         feeder_attr: Final = ZCLAttributeDef(
             id=FEEDER_ATTR, type=types.LVBytes, manufacturer_code=0x115F
         )
         battery_mode: Final = ZCLAttributeDef(
             id=ZCL_BATTERY_MODE, type=types.Bool, manufacturer_code=0x115F
+        )
+        battery_level: Final = ZCLAttributeDef(
+            id=ZCL_BATTERY_LEVEL, type=types.uint8_t, manufacturer_code=0x115F
         )
 
     def __init__(self, *args, **kwargs):
@@ -642,6 +649,17 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         translation_key="led_indicator",
         fallback_name="LED indicator",
     )
+    .sensor(
+        attribute_name=OppleCluster.AttributeDefs.battery_level.name,
+        cluster_id=OppleCluster.cluster_id,
+        device_class=SensorDeviceClass.BATTERY,
+        unit=PERCENTAGE,
+        entity_type=EntityType.DIAGNOSTIC,
+        state_class=SensorStateClass.MEASUREMENT,
+        unique_id_suffix=f"{OppleCluster.cluster_id}-battery_level",
+        translation_key="battery_level",
+        fallback_name="Battery level",
+    )
     .switch(
         attribute_name=OppleCluster.AttributeDefs.child_lock.name,
         cluster_id=OppleCluster.cluster_id,
@@ -681,7 +699,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
     .binary_sensor(
         attribute_name=OppleCluster.AttributeDefs.error_detected.name,
         cluster_id=OppleCluster.cluster_id,
-        entity_type=EntityType.STANDARD,
+        entity_type=EntityType.DIAGNOSTIC,
         device_class=BinarySensorDeviceClass.PROBLEM,
         unique_id_suffix=f"{OppleCluster.cluster_id}-error_detected",
         fallback_name="Error detected",
@@ -689,7 +707,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
     .binary_sensor(
         attribute_name=OppleCluster.AttributeDefs.battery_mode.name,
         cluster_id=OppleCluster.cluster_id,
-        entity_type=EntityType.STANDARD,
+        entity_type=EntityType.DIAGNOSTIC,
         translation_key="battery_mode",
         unique_id_suffix=f"{OppleCluster.cluster_id}-battery_mode",
         fallback_name="Battery mode",

@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 import logging
 import string
+import time
 from typing import Any, Final
 
 from zigpy import types
@@ -55,6 +56,11 @@ FEEDER_ATTR_NAME = "feeder_attr"
 FEEDER_ATTR_TYPE_ID = 0x41
 
 MAX_SCHEDULE_ENTRIES = 5
+
+# Enforced here too since write_attributes() can be reached
+# directly bypassing the UI slider.
+SERVING_SIZE_RANGE = range(1, 11)
+PORTION_WEIGHT_RANGE = range(1, 101)
 
 DAYS_MAP = {
     "everyday": 0x7F,
@@ -215,6 +221,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         """Init."""
         super().__init__(*args, **kwargs)
         self._send_sequence: int = None
+        """Delay battery level report until after battery mode report"""
 
         # Set default values for attributes
         if ZCL_DISABLE_LED_INDICATOR not in self._attr_cache:
@@ -316,7 +323,34 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         LOGGER.debug("OppleCluster._parse_feeder_attribute: value: %s", attribute_value)
 
         if attribute in AQARA_TO_ZCL:
-            self._update_feeder_attribute(attribute, attribute_value)
+            if attribute == BATTERY_LEVEL:
+                zcl_attr_def = self.attributes.get(AQARA_TO_ZCL[attribute])
+                level = zcl_attr_def.type.deserialize(attribute_value)[0]
+
+                last_mode_time = getattr(self, "_last_battery_mode_time", 0.0)
+                # sometimes the battery level is reported before the battery mode,
+                # so we stash it until the mode is confirmed
+                if time.time() - last_mode_time < 1.0:
+                    if self._attr_cache.get(ZCL_BATTERY_MODE, False):
+                        self._update_attribute(ZCL_BATTERY_LEVEL, level)
+                else:
+                    self._pending_battery_level = level
+                    LOGGER.debug(
+                        "OppleCluster._parse_feeder_attribute: stashed battery level %s pending mode confirmation",
+                        level,
+                    )
+
+            elif attribute == BATTERY_MODE:
+                self._update_feeder_attribute(attribute, attribute_value)
+                self._last_battery_mode_time = time.time()
+
+                pending_level = getattr(self, "_pending_battery_level", None)
+                if pending_level is not None:
+                    if self._attr_cache.get(ZCL_BATTERY_MODE, False):
+                        self._update_attribute(ZCL_BATTERY_LEVEL, pending_level)
+                    self._pending_battery_level = None
+            else:
+                self._update_feeder_attribute(attribute, attribute_value)
         elif attribute == FEEDING_REPORT:
             attr_str = attribute_value.decode("utf-8")
             feeding_source = FeedingSource(int(attr_str[0:2], 16))
@@ -353,7 +387,9 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         if length is not None and value is not None:
             val += types.uint8_t(length).serialize()
         if value is not None:
-            if length == 1:
+            if isinstance(value, bytes):
+                val += value
+            elif length == 1:
                 val += types.uint8_t(value).serialize()
             elif length == 2:
                 val += types.uint16_t_be(value).serialize()
@@ -531,7 +567,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
             return None
 
     async def _write_schedule(
-        self, schedule_val: str
+        self, schedule_val: str | list
     ) -> list[list[foundation.WriteAttributesStatusRecord]]:
         """Encode and send the onboard schedule, including clears."""
         packet = self._encode_schedule(schedule_val)
@@ -573,17 +609,59 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         schedule_result: list[list[foundation.WriteAttributesStatusRecord]] = []
         if schedule_key is not None:
             raw_value = attributes.pop(schedule_key)
-            schedule_val = str(getattr(raw_value, "value", raw_value))
+            schedule_val = getattr(raw_value, "value", raw_value)
             schedule_result = await self._write_schedule(schedule_val)
+
+            if self._attr_cache.get(ZCL_SCHEDULE) is None:
+                self._update_attribute(ZCL_SCHEDULE, "[]")
 
             if not attributes:
                 return schedule_result
 
         attrs = {}
+        failed_records: list[list[foundation.WriteAttributesStatusRecord]] = []
         for attr, value in attributes.items():
             attr_def = self.find_attribute(attr)
             attr_id = attr_def.id
             if attr_id in ZCL_TO_AQARA:
+                if attr_def.name == "serving_size" and value not in SERVING_SIZE_RANGE:
+                    LOGGER.error(
+                        "[0x%04X] Invalid serving_size value: %s (expected %d-%d)",
+                        self._endpoint.device.nwk,
+                        value,
+                        SERVING_SIZE_RANGE.start,
+                        SERVING_SIZE_RANGE.stop - 1,
+                    )
+                    failed_records.append(
+                        [
+                            foundation.WriteAttributesStatusRecord(
+                                status=foundation.Status.INVALID_VALUE,
+                                attrid=attr_id,
+                            )
+                        ]
+                    )
+                    continue
+                if (
+                    attr_def.name == "portion_weight"
+                    and value not in PORTION_WEIGHT_RANGE
+                ):
+                    LOGGER.error(
+                        "[0x%04X] Invalid portion_weight value: %s (expected %d-%d)",
+                        self._endpoint.device.nwk,
+                        value,
+                        PORTION_WEIGHT_RANGE.start,
+                        PORTION_WEIGHT_RANGE.stop - 1,
+                    )
+                    failed_records.append(
+                        [
+                            foundation.WriteAttributesStatusRecord(
+                                status=foundation.Status.INVALID_VALUE,
+                                attrid=attr_id,
+                            )
+                        ]
+                    )
+                    continue
+
                 attribute, cooked_value = self._build_feeder_attribute(
                     ZCL_TO_AQARA[attr_id],
                     value,
@@ -595,7 +673,12 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
 
         LOGGER.debug("OppleCluster.write_attributes: %s", attrs)
         kwargs.pop("update_cache", None)
-        result = await super().write_attributes(attrs, update_cache=False, **kwargs)
+        result = (
+            await super().write_attributes(attrs, update_cache=False, **kwargs)
+            if attrs
+            else []
+        )
+        result = failed_records + result
         return schedule_result + result if schedule_key is not None else result
 
 
@@ -641,14 +724,6 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         translation_key="weight_dispensed_today",
         fallback_name="Weight dispensed today",
     )
-    .switch(
-        attribute_name=OppleCluster.AttributeDefs.disable_led_indicator.name,
-        cluster_id=OppleCluster.cluster_id,
-        force_inverted=True,
-        unique_id_suffix=f"{OppleCluster.cluster_id}-disable_led_indicator",
-        translation_key="led_indicator",
-        fallback_name="LED indicator",
-    )
     .sensor(
         attribute_name=OppleCluster.AttributeDefs.battery_level.name,
         cluster_id=OppleCluster.cluster_id,
@@ -659,6 +734,14 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         unique_id_suffix=f"{OppleCluster.cluster_id}-battery_level",
         translation_key="battery_level",
         fallback_name="Battery level",
+    )
+    .switch(
+        attribute_name=OppleCluster.AttributeDefs.disable_led_indicator.name,
+        cluster_id=OppleCluster.cluster_id,
+        force_inverted=True,
+        unique_id_suffix=f"{OppleCluster.cluster_id}-disable_led_indicator",
+        translation_key="led_indicator",
+        fallback_name="LED indicator",
     )
     .switch(
         attribute_name=OppleCluster.AttributeDefs.child_lock.name,
@@ -699,7 +782,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
     .binary_sensor(
         attribute_name=OppleCluster.AttributeDefs.error_detected.name,
         cluster_id=OppleCluster.cluster_id,
-        entity_type=EntityType.DIAGNOSTIC,
+        entity_type=EntityType.STANDARD,
         device_class=BinarySensorDeviceClass.PROBLEM,
         unique_id_suffix=f"{OppleCluster.cluster_id}-error_detected",
         fallback_name="Error detected",
@@ -707,7 +790,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
     .binary_sensor(
         attribute_name=OppleCluster.AttributeDefs.battery_mode.name,
         cluster_id=OppleCluster.cluster_id,
-        entity_type=EntityType.DIAGNOSTIC,
+        entity_type=EntityType.STANDARD,
         translation_key="battery_mode",
         unique_id_suffix=f"{OppleCluster.cluster_id}-battery_mode",
         fallback_name="Battery mode",

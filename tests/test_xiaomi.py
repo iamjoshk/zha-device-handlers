@@ -79,6 +79,7 @@ import zhaquirks.xiaomi.aqara.cube_aqgl01
 import zhaquirks.xiaomi.aqara.driver_curtain_e1
 from zhaquirks.xiaomi.aqara.feeder_acn001 import (
     FEEDER_ATTR,
+    MAX_SCHEDULE_ENTRIES,
     ZCL_BATTERY_MODE,
     ZCL_CHILD_LOCK,
     ZCL_DISABLE_LED_INDICATOR,
@@ -89,6 +90,7 @@ from zhaquirks.xiaomi.aqara.feeder_acn001 import (
     ZCL_LAST_FEEDING_SOURCE,
     ZCL_PORTION_WEIGHT,
     ZCL_PORTIONS_DISPENSED,
+    ZCL_SCHEDULE,
     ZCL_SERVING_SIZE,
     ZCL_WEIGHT_DISPENSED,
     FeedingMode,
@@ -1072,6 +1074,17 @@ async def test_xiaomi_total_active_power_clear(zigpy_device_from_quirk):
         ),
         ("serving_size", 3, b"\x00\x02\x01\x0e\\\x00U\x04\x00\x00\x00\x03"),
         ("portion_weight", 8, b"\x00\x02\x01\x0e_\x00U\x04\x00\x00\x00\x08"),
+        # Boundary values for the UI-declared ranges (1-10 / 1-100) must
+        # still be accepted -- only values outside the range should fail
+        # (see test_aqara_feeder_write_attrs_out_of_range).
+        ("serving_size", 1, b"\x00\x02\x01\x0e\\\x00U\x04\x00\x00\x00\x01"),
+        ("serving_size", 10, b"\x00\x02\x01\x0e\\\x00U\x04\x00\x00\x00\n"),
+        ("portion_weight", 1, b"\x00\x02\x01\x0e_\x00U\x04\x00\x00\x00\x01"),
+        ("portion_weight", 100, b"\x00\x02\x01\x0e_\x00U\x04\x00\x00\x00d"),
+        ("battery_mode", 1, b"\x00\x02\x01\r\t\x00U\x01\x01"),
+        ("battery_mode", 0, b"\x00\x02\x01\r\t\x00U\x01\x00"),
+        ("battery_level", 91, b"\x00\x02\x01\x08\x00\x07\xd1\x01["),
+        ("battery_level", 100, b"\x00\x02\x01\x08\x00\x07\xd1\x01d"),
     ],
 )
 async def test_aqara_feeder_write_attrs(
@@ -1170,6 +1183,14 @@ async def test_aqara_feeder_write_attrs(
             ],
         ),
         (
+            b"\x1c_\x11q\n\xf1\xffA\t\x00\x05\xd4\r\t\x00U\x01\x01",
+            2,
+            [
+                mock.call(ZCL_BATTERY_MODE, True, mock.ANY),
+                mock.call(FEEDER_ATTR, b"\x00\x05\xd4\r\t\x00U\x01\x01", mock.ANY),
+            ],
+        ),
+        (
             b"\x1c_\x11p\n\xf1\xffA\t\x00\x05\x05\x04\x16\x00U\x01\x01",
             2,
             [
@@ -1218,13 +1239,48 @@ async def test_aqara_feeder_write_attrs(
         ),
         (
             b"\x1c_\x11}\n\xf1\xffA(\x00\x05\x15\x08\x00\x08\xc8 7F09000100,7F0D000100,7F13000100",
-            1,
+            2,
             [
+                mock.call(
+                    ZCL_SCHEDULE,
+                    '[{"days":"everyday","hour":9,"minute":0,"portions":1},'
+                    '{"days":"everyday","hour":13,"minute":0,"portions":1},'
+                    '{"days":"everyday","hour":19,"minute":0,"portions":1}]',
+                    mock.ANY,
+                ),
                 mock.call(
                     FEEDER_ATTR,
                     b"\x00\x05\x15\x08\x00\x08\xc8 7F09000100,7F0D000100,7F13000100",
                     mock.ANY,
                 ),
+            ],
+        ),
+        (
+            # Unrecognized days bitmask (0x03 = mon+tue, not one of DAYS_MAP's
+            # named combos): must surface as a raw-mask entry rather than
+            # being silently dropped.
+            b"\x1c_\x11t\n\xf1\xffA\x12\x00\x05\x16\x08\x00\x08\xc8\n03081E0200",
+            2,
+            [
+                mock.call(
+                    ZCL_SCHEDULE,
+                    '[{"days":"mask_0x03","hour":8,"minute":30,"portions":2}]',
+                    mock.ANY,
+                ),
+                mock.call(
+                    FEEDER_ATTR,
+                    b"\x00\x05\x16\x08\x00\x08\xc8\n03081E0200",
+                    mock.ANY,
+                ),
+            ],
+        ),
+        (
+            # Device reporting a cleared/empty onboard schedule.
+            b"\x1c_\x11w\n\xf1\xffA\x08\x00\x05\x17\x08\x00\x08\xc8\x00",
+            2,
+            [
+                mock.call(ZCL_SCHEDULE, "[]", mock.ANY),
+                mock.call(FEEDER_ATTR, b"\x00\x05\x17\x08\x00\x08\xc8\x00", mock.ANY),
             ],
         ),
     ],
@@ -1271,6 +1327,280 @@ async def test_aqara_feeder_attr_reports(
         assert any(u[0] == attr_id and u[1] == value for u in actual_updates), (
             f"Expected ({attr_id}, {value}) in {actual_updates}"
         )
+
+
+def _feeder_device(zigpy_device_from_v2_quirk):
+    """Create an aqara.feeder.acn001 v2 quirk device for a test."""
+    device = zigpy_device_from_v2_quirk(
+        None,
+        "aqara.feeder.acn001",
+        cluster_ids={
+            1: {
+                OnOff.cluster_id: ClusterType.Server,
+                OppleCluster.cluster_id: ClusterType.Server,
+            }
+        },
+    )
+    opple_cluster = device.endpoints[1].opple_cluster
+    opple_cluster._write_attributes = mock.AsyncMock(
+        return_value=[
+            [foundation.WriteAttributesStatusRecord(foundation.Status.SUCCESS)]
+        ]
+    )
+    return opple_cluster
+
+
+def _expected_feeder_attr_write(opple_cluster, expected_bytes):
+    """Build the `_write_attributes` payload expected for a given feeder_attr frame."""
+    expected_attr_def = opple_cluster.find_attribute(FEEDER_ATTR)
+    expected = foundation.Attribute(FEEDER_ATTR, foundation.TypeValue())
+    expected.value.type = foundation.DataType.from_python_type(
+        expected_attr_def.type
+    ).type_id
+    expected.value.value = expected_attr_def.type(expected_bytes)
+    return expected
+
+
+def _schedule_entry(hour: int) -> dict:
+    """Build a single valid schedule entry for a given hour, 2 portions/everyday."""
+    return {"days": "everyday", "hour": hour, "minute": 0, "portions": 2}
+
+
+@pytest.mark.parametrize(
+    "num_entries, expected_bytes",
+    [
+        (1, b"\x00\x02\x01\x08\x00\x08\xc8\x0b7F06000200\x00"),
+        (2, b"\x00\x02\x01\x08\x00\x08\xc8\x167F06000200,7F07000200\x00"),
+        (3, b"\x00\x02\x01\x08\x00\x08\xc8!7F06000200,7F07000200,7F08000200\x00"),
+        (
+            4,
+            b"\x00\x02\x01\x08\x00\x08\xc8,7F06000200,7F07000200,7F08000200,"
+            b"7F09000200\x00",
+        ),
+        (
+            5,
+            b"\x00\x02\x01\x08\x00\x08\xc877F06000200,7F07000200,7F08000200,"
+            b"7F09000200,7F0A000200\x00",
+        ),
+    ],
+    ids=["1-entry", "2-entries", "3-entries", "4-entries", "5-entries (max)"],
+)
+async def test_aqara_feeder_write_schedule(
+    zigpy_device_from_v2_quirk, num_entries, expected_bytes
+):
+    """Test writing a valid schedule to the Aqara C1 pet feeder.
+
+    The schedule is sent as a list of dicts, and the resulting bytes sent
+    to the device are checked against the expected bytes.
+    """
+
+    assert num_entries <= MAX_SCHEDULE_ENTRIES
+    opple_cluster = _feeder_device(zigpy_device_from_v2_quirk)
+    schedule = [_schedule_entry(6 + i) for i in range(num_entries)]
+
+    result = await opple_cluster.write_attributes({"schedule": schedule})
+
+    assert len(opple_cluster._write_attributes.mock_calls) == 1
+    call_args = opple_cluster._write_attributes.mock_calls[0]
+    assert call_args.args[0] == [
+        _expected_feeder_attr_write(opple_cluster, expected_bytes)
+    ]
+    assert call_args.kwargs["manufacturer"] == 0x115F
+    assert result[0][0].status == foundation.Status.SUCCESS
+
+    # The write must not optimistically update the cached schedule -- only
+    # the device's own echoed report (see test_aqara_feeder_attr_reports)
+    # should do that.
+    assert opple_cluster._attr_cache.get(ZCL_SCHEDULE) == "[]"
+
+
+async def test_aqara_feeder_write_schedule_as_json_string(zigpy_device_from_v2_quirk):
+    """The schedule must also be accepted as a JSON-encoded string."""
+
+    opple_cluster = _feeder_device(zigpy_device_from_v2_quirk)
+    schedule_json = (
+        '[{"days":"everyday","hour":6,"minute":0,"portions":2},'
+        '{"days":"everyday","hour":11,"minute":0,"portions":2},'
+        '{"days":"everyday","hour":20,"minute":15,"portions":2}]'
+    )
+
+    result = await opple_cluster.write_attributes({"schedule": schedule_json})
+
+    assert len(opple_cluster._write_attributes.mock_calls) == 1
+    call_args = opple_cluster._write_attributes.mock_calls[0]
+    expected_bytes = (
+        b"\x00\x02\x01\x08\x00\x08\xc8!7F06000200,7F0B000200,7F140F0200\x00"
+    )
+    assert call_args.args[0] == [
+        _expected_feeder_attr_write(opple_cluster, expected_bytes)
+    ]
+    assert result[0][0].status == foundation.Status.SUCCESS
+
+
+async def test_aqara_feeder_write_schedule_clear(zigpy_device_from_v2_quirk):
+    """Sending an empty list must send a real clear frame."""
+
+    opple_cluster = _feeder_device(zigpy_device_from_v2_quirk)
+
+    result = await opple_cluster.write_attributes({"schedule": []})
+
+    assert len(opple_cluster._write_attributes.mock_calls) == 1
+    call_args = opple_cluster._write_attributes.mock_calls[0]
+    expected_bytes = b"\x00\x02\x01\x08\x00\x08\xc8\x01\x00"
+    assert call_args.args[0] == [
+        _expected_feeder_attr_write(opple_cluster, expected_bytes)
+    ]
+    assert result[0][0].status == foundation.Status.SUCCESS
+
+
+@pytest.mark.parametrize(
+    "schedule",
+    [
+        # More than MAX_SCHEDULE_ENTRIES (5) entries.
+        [_schedule_entry(6 + i) for i in range(MAX_SCHEDULE_ENTRIES + 1)],
+        # Unknown day name -- must be rejected outright, never silently
+        # widened to "everyday".
+        [{"days": "someday", "hour": 6, "minute": 0, "portions": 2}],
+        # Missing "days" key entirely.
+        [{"hour": 6, "minute": 0, "portions": 2}],
+        # Hour out of range.
+        [{"days": "everyday", "hour": 24, "minute": 0, "portions": 2}],
+        [{"days": "everyday", "hour": -1, "minute": 0, "portions": 2}],
+        # Minute out of range.
+        [{"days": "everyday", "hour": 6, "minute": 60, "portions": 2}],
+        # Portions out of range (schedule entries allow 1-10 portions).
+        [{"days": "everyday", "hour": 6, "minute": 0, "portions": 0}],
+        [{"days": "everyday", "hour": 6, "minute": 0, "portions": 11}],
+        # An entry that isn't a dict.
+        ["not-a-dict"],
+        # Missing required hour/minute keys.
+        [{"days": "everyday", "portions": 2}],
+        # Malformed JSON when a raw string is written instead of a list.
+        "not valid json",
+        # Not a list or a JSON-encoded list at all.
+        '{"days": "everyday"}',
+    ],
+    ids=[
+        "too-many-entries",
+        "unknown-day-name",
+        "missing-days",
+        "hour-too-high",
+        "hour-negative",
+        "minute-too-high",
+        "portions-zero",
+        "portions-too-high",
+        "entry-not-a-dict",
+        "missing-hour-minute",
+        "malformed-json-string",
+        "json-not-a-list",
+    ],
+)
+async def test_aqara_feeder_write_schedule_invalid(
+    zigpy_device_from_v2_quirk, schedule
+):
+    """Invalid schedules must fail loudly, with nothing sent to the device."""
+    opple_cluster = _feeder_device(zigpy_device_from_v2_quirk)
+
+    result = await opple_cluster.write_attributes({"schedule": schedule})
+
+    opple_cluster._write_attributes.assert_not_called()
+    assert result[0][0].status == foundation.Status.FAILURE
+
+    # A rejected write must not touch the cached schedule value either.
+    assert opple_cluster._attr_cache.get(ZCL_SCHEDULE) == "[]"
+
+
+@pytest.mark.parametrize(
+    "attribute, value",
+    [
+        ("serving_size", 0),
+        ("serving_size", 11),
+        ("serving_size", -1),
+        ("portion_weight", 0),
+        ("portion_weight", 101),
+        ("portion_weight", -5),
+    ],
+)
+async def test_aqara_feeder_write_attrs_out_of_range(
+    zigpy_device_from_v2_quirk, attribute, value
+):
+    """Invalid serving_size and portion_weight must fail.
+
+    Writes outside the UI-declared bounds must fail rather than sending
+    a bogus frame -- these bounds only existed client-side on
+    the number() entities.
+    """
+
+    opple_cluster = _feeder_device(zigpy_device_from_v2_quirk)
+
+    result = await opple_cluster.write_attributes({attribute: value})
+
+    opple_cluster._write_attributes.assert_not_called()
+    assert result[0][0].status == foundation.Status.INVALID_VALUE
+
+
+async def test_aqara_feeder_write_attrs_multi(zigpy_device_from_v2_quirk):
+    """Must send both schedule and unrelated attribute in same call.
+
+    The schedule must not swallow the rest of the batch, and vice versa.
+    """
+
+    opple_cluster = _feeder_device(zigpy_device_from_v2_quirk)
+    schedule = [_schedule_entry(6)]
+
+    result = await opple_cluster.write_attributes(
+        {"schedule": schedule, "child_lock": 1}
+    )
+
+    assert len(opple_cluster._write_attributes.mock_calls) == 2
+    schedule_call, child_lock_call = opple_cluster._write_attributes.mock_calls
+    assert schedule_call.args[0] == [
+        _expected_feeder_attr_write(
+            opple_cluster, b"\x00\x02\x01\x08\x00\x08\xc8\x0b7F06000200\x00"
+        )
+    ]
+    assert child_lock_call.args[0] == [
+        _expected_feeder_attr_write(opple_cluster, b"\x00\x02\x02\x04\x16\x00U\x01\x01")
+    ]
+    assert len(result) == 2
+    assert all(record[0].status == foundation.Status.SUCCESS for record in result)
+
+
+async def test_aqara_feeder_no_duplicate_events(zigpy_device_from_v2_quirk):
+    """A single incoming feeder_attr report must not be processed twice.
+
+    OppleCluster used to subscribe _handle_attribute_event
+    to both AttributeReportedEvent and AttributeUpdatedEvent, and since the
+    base cluster's own report handling also fires AttributeUpdatedEvent for
+    the raw feeder_attr, that caused every derived sub-attribute (and its
+    zha_event) to fire twice per report.
+    """
+
+    opple_cluster = _feeder_device(zigpy_device_from_v2_quirk)
+
+    derived_attr_updates: list[tuple[int, Any]] = []
+
+    def on_attribute_event(event: AttributeReportedEvent | AttributeUpdatedEvent):
+        if event.attribute_id == ZCL_CHILD_LOCK:
+            derived_attr_updates.append((event.attribute_id, event.value))
+
+    opple_cluster.on_event(AttributeUpdatedEvent.event_type, on_attribute_event)
+
+    # A single child_lock=True report from the device.
+    device = opple_cluster.endpoint.device
+    device.packet_received(
+        t.ZigbeePacket(
+            profile_id=zha.PROFILE_ID,
+            cluster_id=opple_cluster.cluster_id,
+            src_ep=opple_cluster.endpoint.endpoint_id,
+            dst_ep=opple_cluster.endpoint.endpoint_id,
+            data=t.SerializableBytes(
+                b"\x1c_\x11p\n\xf1\xffA\t\x00\x05\x05\x04\x16\x00U\x01\x01"
+            ),
+        )
+    )
+
+    assert derived_attr_updates == [(ZCL_CHILD_LOCK, True)]
 
 
 @pytest.mark.parametrize("quirk", (zhaquirks.xiaomi.aqara.smoke.LumiSensorSmokeAcn03,))

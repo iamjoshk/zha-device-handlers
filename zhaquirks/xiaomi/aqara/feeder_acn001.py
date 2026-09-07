@@ -221,7 +221,6 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         """Init."""
         super().__init__(*args, **kwargs)
         self._send_sequence: int = None
-        """Delay battery level report until after battery mode report"""
 
         # Set default values for attributes
         if ZCL_DISABLE_LED_INDICATOR not in self._attr_cache:
@@ -329,7 +328,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
 
                 last_mode_time = getattr(self, "_last_battery_mode_time", 0.0)
                 # sometimes the battery level is reported before the battery mode,
-                # so we stash it until the mode is confirmed
+                # so we delay it until the mode is confirmed
                 if time.time() - last_mode_time < 1.0:
                     if self._attr_cache.get(ZCL_BATTERY_MODE, False):
                         self._update_attribute(ZCL_BATTERY_LEVEL, level)
@@ -705,12 +704,14 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         cluster_id=OppleCluster.cluster_id,
         unique_id_suffix=f"{OppleCluster.cluster_id}-last_feeding_size",
         translation_key="last_feeding_size",
+        unit="portions",
         fallback_name="Last feeding size",
     )
     .sensor(
         attribute_name=OppleCluster.AttributeDefs.portions_dispensed.name,
         cluster_id=OppleCluster.cluster_id,
         state_class=SensorStateClass.TOTAL_INCREASING,
+        unit="portions",
         unique_id_suffix=f"{OppleCluster.cluster_id}-portions_dispensed",
         translation_key="portions_dispensed_today",
         fallback_name="Portions dispensed today",
@@ -764,6 +765,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
         min_value=1,
         max_value=10,
         mode="box",
+        unit="portions",
         unique_id_suffix=f"{OppleCluster.cluster_id}-serving_size",
         translation_key="serving_size",
         fallback_name="Serving size",
@@ -782,7 +784,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
     .binary_sensor(
         attribute_name=OppleCluster.AttributeDefs.error_detected.name,
         cluster_id=OppleCluster.cluster_id,
-        entity_type=EntityType.STANDARD,
+        entity_type=EntityType.DIAGNOSTIC,
         device_class=BinarySensorDeviceClass.PROBLEM,
         unique_id_suffix=f"{OppleCluster.cluster_id}-error_detected",
         fallback_name="Error detected",
@@ -790,7 +792,7 @@ class OppleCluster(XiaomiAqaraE1Cluster, EventableCluster):
     .binary_sensor(
         attribute_name=OppleCluster.AttributeDefs.battery_mode.name,
         cluster_id=OppleCluster.cluster_id,
-        entity_type=EntityType.STANDARD,
+        entity_type=EntityType.DIAGNOSTIC,
         translation_key="battery_mode",
         unique_id_suffix=f"{OppleCluster.cluster_id}-battery_mode",
         fallback_name="Battery mode",
